@@ -11,6 +11,6 @@ content_divs = soup.find_all('div', class_='scrolling-script-container')
 
 with open('../data/imitation_game.txt', 'w', encoding='utf-8') as f:
     for content in content_divs:
-        f.write(content.get_text(strip=True) + '\n\n')
+        f.write(content.get_text() + '\n\n')
 
 print("Content saved to imitation_game.txt")
