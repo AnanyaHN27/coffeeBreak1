@@ -1,0 +1,212 @@
+---
+title: "Coffee Break draft"
+output: html_document
+date: "2024-09-25"
+---
+
+```{r}
+library(quanteda)
+library(quanteda.textstats)
+library(tidyverse)
+library(gt)
+library(ggplot2)
+
+source("/Users/yahanyang/Desktop/CMU_everything/36-468Text Analysis/helper_functions.R")
+source("/Users/yahanyang/Desktop/CMU_everything/36-468Text Analysis/dispersion_functions.R")
+load('/Users/yahanyang/Desktop/CMU_everything/36-468Text Analysis/multiword_expressions.rda')
+```
+
+## Read, corpus, tokenization and dfm
+
+For each step, I create respective variable instead of pipeline to make life easier for further analysis.
+
+```{r cars}
+totc_beautiful <- readLines("/Users/yahanyang/coffeeBreak1/data/beautiful_mind.txt")
+totc_imitation <- readLines("/Users/yahanyang/coffeeBreak1/data/imitation_game.txt")
+
+totc_beautiful_corpus <- corpus(totc_beautiful)
+totc_imitation_corpus <- corpus(totc_imitation)
+
+beautiful_token <- totc_beautiful_corpus |>
+  tokens(what = "word", remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) |>
+  tokens_tolower() 
+
+beautiful_dfm <- beautiful_token |>
+  dfm()
+  
+imitation_token <- totc_imitation_corpus |>
+  tokens(what = "word", remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) |>
+  tokens_tolower() 
+
+imitation_dfm <- imitation_token |>
+  dfm()
+```
+
+## Frequency overview of two corpora
+
+Here we first look at the general frequency of two corpora. Results show similarities but are useless for further analysis.
+
+```{r}
+beautiful_freq <- beautiful_dfm |>
+  textstat_frequency() %>%
+  head(10)
+gt(beautiful_freq)
+
+imitation_freq <- imitation_dfm |>
+  textstat_frequency() %>%
+  head(10)
+gt(imitation_freq)
+
+```
+Below is the total token counts in each film corpora.
+
+```{r}
+comb_corpus <- data.frame(
+  doc_id = c(paste0("totc_beautiful_", seq_along(totc_beautiful)),
+             paste0("totc_immitation_", seq_along(totc_immitation))),
+  text = c(totc_beautiful, totc_immitation)
+) %>%
+  mutate(text = preprocess_text(text)) %>%
+  corpus()
+
+text_type <- c(rep("Beautiful_Mind", length(totc_beautiful)),
+               rep("Imitation_Game", length(totc_immitation)))
+
+docvars(comb_corpus) <- data.frame(text_type = text_type)
+
+comb_tkns <- comb_corpus %>%
+  tokens(what = "word")
+comb_dfm <- dfm(comb_tkns) %>% 
+  dfm_group(groups = text_type)
+
+corpus_comp <- ntoken(comb_dfm) %>%
+  data.frame(frequency = .) %>%
+  rownames_to_column("group") %>%
+  group_by(group) %>%
+  summarize(Texts = n(),
+            Tokens = sum(frequency))
+
+corpus_comp |> 
+  gt() |>
+  fmt_integer() |>
+  cols_label(
+    group = md("**Text Type**"),
+    Texts = md("**Texts**"),
+    Tokens = md("**Tokens**")
+  ) |>
+  grand_summary_rows(
+    columns = c(Texts, Tokens),
+    fns = list(
+      Total ~ sum(.)
+    ) ,
+    fmt = ~ fmt_integer(.)
+  )
+
+
+```
+For the purpose of looking into meaningful tokens, we create the following words list that consists of the potential words contributing to further analysis. From now on, the analysis and graphs all focus on the list below.
+
+```{r}
+word_list <- c("god","genius", "math", "mathematics", "mathmeticians","code", "decode", "war", "code breaking", "love", 
+               "machine", "number", "isolation", "sacrifice", "turing", "nash", 
+               "mind", "think", "help", "truth", "problem", "time", "fear", 
+               "belief", "change", "work")
+```
+
+Using the word list, we tokenize, dfm and construct the following tables showing token frequency. 
+
+```{r}
+list_bealtiful_token <- beautiful_token |>
+  tokens_wordstem() |>
+  tokens_select(pattern = word_list) 
+
+list_bealtiful_dfm <- list_bealtiful_token |>
+  dfm()
+
+list_beautiful_freq <- list_bealtiful_dfm |>
+  textstat_frequency()
+gt(list_beautiful_freq) 
+
+
+list_imitation_token <- imitation_token |>
+  tokens_wordstem() |>
+  tokens_select(pattern = word_list) 
+
+list_imitation_dfm <- list_imitation_token |>
+  dfm()
+
+list_imitation_freq <- list_imitation_dfm |>
+  textstat_frequency()
+gt(list_imitation_freq) 
+
+
+```
+
+Find out whether these tokens in the list are common or unique in each corpus.
+```{r}
+tokens_beautiful_vec <- unique(as.character(beautiful_token))
+tokens_imitation_vec <- unique(as.character(imitation_token))
+common_tokens <- intersect(tokens_beautiful_vec, tokens_imitation_vec)
+
+# Find tokens only in Beautiful Mind
+unique_beautiful <- setdiff(tokens_beautiful_vec, tokens_imitation_vec)
+
+# Find tokens only in Imitation Game
+unique_imitation <- setdiff(tokens_imitation_vec, tokens_beautiful_vec)
+
+# Create data frames for better visualization
+common_tokens_df <- data.frame(Token = common_tokens, Type = "Common")
+unique_beautiful_df <- data.frame(Token = unique_beautiful, Type = "Beautiful Mind Only")
+unique_imitation_df <- data.frame(Token = unique_imitation, Type = "Imitation Game Only")
+
+comparison_results <- bind_rows(common_tokens_df, unique_beautiful_df, unique_imitation_df)
+
+comparison_table <- comparison_results %>%
+  gt() %>%
+  tab_header(
+    title = "Token Comparison Between Beautiful Mind and Imitation Game",
+    subtitle = "Common and Unique Tokens"
+  ) %>%
+  cols_label(
+    Token = "Token",
+    Type = "Token Type"
+  ) %>%
+  fmt_markdown(columns = c(Token, Type))
+
+comparison_table
+
+```
+Create the bar chart of common tokens and frequency.
+```{r}
+
+dfm_beautiful <- dfm(list_bealtiful_token)
+dfm_imitation <- dfm(list_imitation_token)
+
+# Get frequency data
+freq_beautiful <- textstat_frequency(dfm_beautiful) %>%
+  filter(feature %in% common_tokens) %>%
+  mutate(corpus = "Beautiful Mind")
+
+freq_imitation <- textstat_frequency(dfm_imitation) %>%
+  filter(feature %in% common_tokens) %>%
+  mutate(corpus = "Imitation Game")
+
+# Combine frequency data
+freq_combined <- bind_rows(freq_beautiful, freq_imitation)
+
+
+# Create a bar chart of the common tokens' frequencies in both corpora
+ggplot(freq_combined, aes(x = reorder(feature, -frequency), y = frequency, fill = corpus)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Frequency of Common Tokens in 'Beautiful Mind' and 'Imitation Game'",
+    x = "Token",
+    y = "Frequency",
+    fill = "Corpus"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Tilt x-axis labels for readability
+
+```
+
+
